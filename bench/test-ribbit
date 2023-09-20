@@ -1,0 +1,67 @@
+#!/bin/bash
+
+# variations:
+# asm
+# asm-pna
+# asm-tc
+# asm-pna-tc
+
+# js 
+# js-pna
+# js-tc
+# js-pna-tc
+
+# asm-repl
+# asm-repl-pna 
+# asm-repl-tc: FAIL (takes too long)
+
+BENCH_OPT="-i num-iters-int.scm"
+
+ASM_OPT="-t asm -e optimal -f+ compression/lzss/2b"
+JS_OPT="-t js -m -e optimal -f+ compression/lzss/tag"
+
+PNA_OPT="-f+ prim-no-arity"
+TC_OPT="-l r4rs/optimize-tc -l r4rs/tc"
+O_OPT="-l r4rs/optimize"
+
+RSC_TESTS="ctak fib ack mazefun tak takl primes deriv nqueens sum"
+RSI_TESTS="ctak fib ack mazefun tak takl primes deriv"
+
+export RIBBIT_COMP="/home/laromat/ribbit/src/rsc"
+export RIBBIT_INT="/home/laromat/ribbit/src/rsi"
+
+echo $RIBBIT_COMP
+
+run_bench() {
+   local filename=$1
+   shift
+   echo "Command :" "$@" > $filename
+   echo running "$@"
+   "$@" | tee -a $filename
+}
+
+# for variation asm:
+# Already runned
+#run_bench "results/size-asm.log" ./bench $BENCH_OPT -o "$ASM_OPT $O_OPT" ribbit "$RSC_TESTS"
+#run_bench "results/size-asm-pna.log" ./bench $BENCH_OPT -o "$ASM_OPT $O_OPT $PNA_OPT" ribbit "$RSC_TESTS"
+#run_bench "results/size-asm-tc.log" ./bench $BENCH_OPT -o "$ASM_OPT $TC_OPT" ribbit "$RSC_TESTS"
+#run_bench "results/size-asm-pna-tc.log" ./bench $BENCH_OPT -o "$ASM_OPT $TC_OPT $PNA_OPT" ribbit "$RSC_TESTS"
+
+# For variation js:
+#run_bench "results/size-js.log" ./bench $BENCH_OPT -o "$JS_OPT $O_OPT" ribbit "$RSC_TESTS"
+#run_bench "results/size-js-pna.log" ./bench $BENCH_OPT -o "$JS_OPT $O_OPT $PNA_OPT" ribbit "$RSC_TESTS"
+#run_bench "results/size-js-tc.log" ./bench $BENCH_OPT -o "$JS_OPT $TC_OPT" ribbit "$RSC_TESTS"
+#run_bench "results/size-js-pna-tc.log" ./bench $BENCH_OPT -o "$JS_OPT $TC_OPT $PNA_OPT" ribbit "$RSC_TESTS"
+
+# For the repl : 
+
+#run_bench "results/size-repl-asm.log" ./bench $BENCH_OPT ribbit-int "$RSI_TESTS"
+run_bench "results/size-gsi.log" ./bench $BENCH_OPT gambit-int "$RSC_TESTS"
+
+
+
+# ./bench $BENCH_OPT -o "$ASM_OPT $O_OPT" ribbit "$RSC_TESTS" > results/bench-asm.log
+# ./bench $BENCH_OPT -o "$ASM_OPT $O_OPT $PNA_OPT" ribbit "$RSC_TESTS" > results/bench-asm-pna.log
+# ./bench $BENCH_OPT -o "$ASM_OPT $TC_OPT" ribbit "$RSC_TESTS" > results/bench-asm-pna.log
+# 
+# ...

@@ -246,14 +246,20 @@ gambit_int_exec ()
 
 ribbit_comp ()
 {
+    echo $RIBBIT_COMP $COMPOPTS -x "$1" "$1.scm"
     {
-      echo $RIBBIT_COMP $COMPOPTS -x $1 -o $1.out $1.scm
-    } | /usr/bin/time sh
+      echo $RIBBIT_COMP $COMPOPTS -x "$1" "$1.scm"
+    } | /usr/bin/time -f 'comp_real: %e' sh
 }
 
 ribbit_exec ()
 {
-    /usr/bin/time "./$1"
+    if [ -f "./$1" ]; then 
+        /usr/bin/time -f 'real: %e' "./$1"
+	#echo "skipping running..."
+        printf "size: "
+        ls -lah "./$1" | awk '{print $5}'
+    fi
 }
 
 ribbit_int_comp ()
@@ -263,8 +269,9 @@ ribbit_int_comp ()
 
 ribbit_int_exec ()
 {
-    EVAL="$(printf "$REPLCOMMANDS" "$1")"
-    $RIBBIT_INT -e "$EVAL"
+    {
+        printf "$REPLCOMMANDS" "$1"
+    } | /usr/bin/time -f 'real: %e' $RIBBIT_INT 
 }
 
 # -----------------------------------------------------------------------------
@@ -529,7 +536,7 @@ cmdline="$0"
 flagsdone=0
 
 NB_RUNS=1
-clean=true
+clean=false
 setting=r5rs
 options=""
 
