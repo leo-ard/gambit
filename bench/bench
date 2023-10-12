@@ -17,7 +17,7 @@ error ()
 {
   echo $1
   echo '
-Usage: bench [-r runs] [-c clean] [-i iterfile] [-s setting] [-o options] <scheme-systems> <benchmarks>
+Usage: bench [-r runs] [-c clean] [-i iterfile] [-s setting] [-o options] [-f format] <scheme-systems> <benchmarks>
 
 <scheme-systems> is the abbreviated name of one or more
 language implementations to use, i.e.:
@@ -87,7 +87,13 @@ setting is the benchmarking setting.  The possible values are:
        - safe execution (i.e. an exception must be signalled on errors)
 
   r6rs-fixflo-unsafe:
-       - like r6rs-fixflo setting but errors are not checked'
+       - like r6rs-fixflo setting but errors are not checked
+
+format indicates the output format to stdout. The possible values are : 
+
+  human (default)  Outputs the format to be read by a human
+  sexp             Outputs the format as an s-expression
+'
 
   exit
 }
@@ -126,15 +132,17 @@ evaluate ()
   echo > clean_newer_than_me
   sleep 1
   {
-  echo
-  echo Testing $1 under ${NAME}-${setting}
-  echo Compiling...
+  if [ $format == "human" ]; then
+    echo
+    echo Testing $1 under ${NAME}-${setting}
+    echo Compiling...
+  fi
   make_src_code $1
   $COMP $1
   i=0
   while [ "$i" -lt "$NB_RUNS" ]
   do
-    echo Running...
+    [ $format == "human" ] && echo Running...
     $EXEC $1
     i=`expr $i + 1`
   done
@@ -249,16 +257,15 @@ ribbit_comp ()
     echo $RIBBIT_COMP $COMPOPTS -x "$1" "$1.scm"
     {
       echo $RIBBIT_COMP $COMPOPTS -x "$1" "$1.scm"
-    } | /usr/bin/time -f 'comp_real: %e' sh
+    } | /usr/bin/time sh
 }
 
 ribbit_exec ()
 {
+  
     if [ -f "./$1" ]; then 
-        /usr/bin/time -f 'real: %e' "./$1"
-	#echo "skipping running..."
-        printf "size: "
-        ls -lah "./$1" | awk '{print $5}'
+        /usr/bin/time "./$1"
+        # ls -lah "./$1" | awk '{print $5}'
     fi
 }
 
@@ -539,6 +546,7 @@ NB_RUNS=1
 clean=false
 setting=r5rs
 options=""
+format=human
 
 while [ $# -gt 2 ] ; do
    arg="$1"
@@ -549,6 +557,7 @@ while [ $# -gt 2 ] ; do
       -i) forceiters=$1 ; shift ;;
       -s) setting=$1    ; shift ;;
       -o) options=$1    ; shift ;;
+      -f) format=$1     ; shift ;;
        *) error ">>> Unknown argument of $arg given." ;;
    esac
 done
@@ -1143,14 +1152,19 @@ petite-chez) NAME='Petite-Chez-Scheme'
    fi
 
    {
+      if [ $format == "human" ] ; then
       echo
       echo '****************************'
       echo Benchmarking ${NAME}-${setting} on `date` under `uname -a`
-   } >> ../../results.${NAME}-${setting}
+      else
+      echo "(((name $NAME) (setting $setting) (date $(date)) (system $(uname -a))"
+      fi
+   } 2>&1 | tee -a ../../results.${NAME}-${setting}
 
    for program in $benchmarks ; do
       evaluate $program
    done
+   echo ")"
    cd ../..
    if [ $? != 0 ] ; then
       echo "ERROR: Can't change back to benchmark directory."
