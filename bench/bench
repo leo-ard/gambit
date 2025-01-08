@@ -10,6 +10,7 @@
 #
 #   Harvey Stein (abel@netvision.net.il)
 #   Mathis Laroche (mathis.laroche@umontreal.ca)
+#   Léonard Oest O'Leary (leonard.oest.oleary@umontreal.ca)
 #
 # -----------------------------------------------------------------------------
 
@@ -17,7 +18,7 @@ error ()
 {
   echo $1
   echo '
-Usage: bench [-r runs] [-c clean] [-i iterfile] [-s setting] [-o options] [-f format] <scheme-systems> <benchmarks>
+Usage: bench [-r runs] [-c clean] [-i iterfile] [-s setting] [-o options] [-f format] [-t time] <scheme-systems> <benchmarks>
 
 <scheme-systems> is the abbreviated name of one or more
 language implementations to use, i.e.:
@@ -68,7 +69,7 @@ setting is the benchmarking setting.  The possible values are:
 
   r6rs:
        - generic arithmetic operations
-       - overflow detection on fixnum arithmetic (either produce a  
+       - overflow detection on fixnum arithmetic (either produce a
          bignum or signal an exception)
        - immutable bindings for the definitions in the benchmark
        - immutable predefined bindings (for +, car, ...)
@@ -89,11 +90,15 @@ setting is the benchmarking setting.  The possible values are:
   r6rs-fixflo-unsafe:
        - like r6rs-fixflo setting but errors are not checked
 
-format indicates the output format to stdout. The possible values are : 
+format changes the output format. The possible values are :
 
   human (default)  Outputs the format to be read by a human
   sexp             Outputs the format as an s-expression
-'
+
+time indicates the command that must be used to time the benchmarks. If set to
+"false", then each implementation is responsible to time its own benchmark.
+This is done with a macro that is injected at the beginning of the file. By
+default it is "/usr/bin/time".'
 
   exit
 }
@@ -105,6 +110,26 @@ GAMBIT_INT=${GAMBIT_INT:-"../../../gsi/gsi -:m10000,d-,~~=../../.."}
 
 RIBBIT_COMP=${RIBBIT_COMP:-rsc}
 RIBBIT_INT=${RIBBIT_INT:-rsi}
+
+MUST_TIME_IN_CODE="no"
+TIME="/usr/bin/time"
+
+time_sexp ()
+{
+  if [ "$PHASE" == "comp" ]; then
+    if [ "$time" == "false" ]; then
+      /usr/bin/time $@ 2>&1 | awk '{ print "(comp-time " $1 ")" }'
+    else
+      $time $@ 2>&1 | awk '{ print "(comp-time " $1 ")" }'
+    fi
+  else
+    if [ "$time" == "false" ]; then
+      $@
+    else
+      $time $@ 2>&1 | awk '{ print "(run-time " $1 ")" }'
+    fi
+  fi
+}
 
 CPU_LIMIT=${CPU_LIMIT:-"300"}
 
@@ -132,20 +157,27 @@ evaluate ()
   echo > clean_newer_than_me
   sleep 1
   {
+  PHASE="comp"
   if [ $format == "human" ]; then
     echo
     echo Testing $1 under ${NAME}-${setting}
     echo Compiling...
+  else
+    echo "((benchmark $1)"
   fi
   make_src_code $1
   $COMP $1
   i=0
   while [ "$i" -lt "$NB_RUNS" ]
   do
-    [ $format == "human" ] && echo Running...
+    PHASE="run"
+    if [ $format == "human" ]; then
+      echo Running...
+    fi
     $EXEC $1
     i=`expr $i + 1`
   done
+  echo ")"
   cleanup
   } 2>&1 | tee -a ../../results.${NAME}-${setting}
 
@@ -162,7 +194,8 @@ make_src_code ()
      ".java")
        cat ../../src/$1.java > $1.java ;;
      ".scm")
-       printf "$PREFIXCODE\n" "$1" "$1" > $1-prefix.scm
+       echo "" > $1-prefix.scm
+       printf "$PREFIXCODE\n" "$1" "$1" >> $1-prefix.scm
        printf "$SUFFIXCODE\n" "$1" "$1" > $1-suffix.scm
        cat $1-prefix.scm ../../prefix/prefix-${system}.scm | sed "s/;INSERTCODE/$INSERTCODE/" | cat - ../../num-iters/${iterfile} ../../src/$1.scm ../../suffix/suffix-${system}.scm $1-suffix.scm > $1.scm ;;
      ".ss")
@@ -192,9 +225,9 @@ nonexistent_exec ()
 gambit_comp ()
 {
   vers=`$GAMBIT_COMP -v | sed -e 's/ .*//g'`
-  major="`echo \"$vers\" | sed -e \"s/v\\([0-9]*\\)\\.\\([0-9]*\\)\\.\\([0-9]*\\)\\(.*\\)/\\1/g\"`"
-  minor="`echo \"$vers\" | sed -e \"s/v\\([0-9]*\\)\\.\\([0-9]*\\)\\.\\([0-9]*\\)\\(.*\\)/\\2/g\"`"
-  revision="`echo \"$vers\" | sed -e \"s/v\\([0-9]*\\)\\.\\([0-9]*\\)\\.\\([0-9]*\\)\\(.*\\)/\\3/g\"`"
+  major="`echo \"$vers\" | sed -e \"s/v\\([0-9]*\\)\\.\\([0-9]*\\)\\.\\([0-9]*\\)\\(.*\\)/\\1/g\"`" # "
+  minor="`echo \"$vers\" | sed -e \"s/v\\([0-9]*\\)\\.\\([0-9]*\\)\\.\\([0-9]*\\)\\(.*\\)/\\2/g\"`" # "
+  revision="`echo \"$vers\" | sed -e \"s/v\\([0-9]*\\)\\.\\([0-9]*\\)\\.\\([0-9]*\\)\\(.*\\)/\\3/g\"`" # "
   version=$(( major * 100000 + minor * 1000 + revision ))
 
   rm -f $1.o* $1.exe
@@ -203,13 +236,13 @@ gambit_comp ()
 
     {
       echo $GAMBIT_COMP $COMPOPTS $1.scm
-    } | /usr/bin/time sh
+    } | $TIME sh
 
   else
 
     {
       echo $GAMBIT_COMP $COMPOPTS -exe -o $1.exe $1.scm
-    } | /usr/bin/time sh
+    } | $TIME sh
     strip "$1.exe"
 
   fi
@@ -219,23 +252,9 @@ gambit_exec ()
 {
   if test -f ./$1.exe
   then
-
-    if command -v perf
-    then
-      perf stat "./$1.exe" -:m10000,d-,~~=../../..
-    else
-      /usr/bin/time "./$1.exe" -:m10000,d-,~~=../../..
-    fi
-
+    $TIME "./$1.exe" -:m10000,d-,~~=../../..
   else
-
-    if command -v perf
-    then
-      perf stat $GAMBIT_INT "./$1.o1"
-    else
-      /usr/bin/time $GAMBIT_INT "./$1.o1"
-    fi
-
+    $TIME $GAMBIT_INT "./$1.o1"
   fi
 }
 
@@ -246,7 +265,7 @@ gambit_int_comp ()
 
 gambit_int_exec ()
 {
-  printf "$REPLCOMMANDS" "$1" | $GAMBIT_INT
+  $GAMBIT_INT -e "$(printf "$REPLCOMMANDS" "$1")"
 }
 
 # -----------------------------------------------------------------------------
@@ -254,18 +273,16 @@ gambit_int_exec ()
 
 ribbit_comp ()
 {
-    echo $RIBBIT_COMP $COMPOPTS -x "$1" "$1.scm"
     {
       echo $RIBBIT_COMP $COMPOPTS -x "$1" "$1.scm"
-    } | /usr/bin/time sh
+    } | $TIME sh
 }
 
 ribbit_exec ()
 {
-  
-    if [ -f "./$1" ]; then 
-        /usr/bin/time "./$1"
-        # ls -lah "./$1" | awk '{print $5}'
+    if [ -f "./$1" ]; then
+        $TIME "./$1"
+        ls -la "./$1" | awk '{print "(size " $5 ")"}' #"
     fi
 }
 
@@ -278,7 +295,7 @@ ribbit_int_exec ()
 {
     {
         printf "$REPLCOMMANDS" "$1"
-    } | /usr/bin/time -f 'real: %e' $RIBBIT_INT 
+    } | $TIME $RIBBIT_INT
 }
 
 # -----------------------------------------------------------------------------
@@ -290,7 +307,7 @@ bigloo_comp ()
      compiler|ctak|dynamic|fibc|maze|puzzle|scheme) usecc="-call/cc" ;;
      *) usecc="" ;;
   esac
-  /usr/bin/time bigloo $usecc $COMPOPTS $1.scm -o $1
+  $TIME bigloo $usecc $COMPOPTS $1.scm -o $1
 }
 
 bigloo_exec ()
@@ -307,7 +324,7 @@ bigloo_int_comp ()
 
 bigloo_int_exec ()
 {
-  printf "$REPLCOMMANDS" "$1" | GC_INITIAL_HEAP_SIZE=10240000 /usr/bin/time bigloo -heapsize 10
+  printf "$REPLCOMMANDS" "$1" | GC_INITIAL_HEAP_SIZE=10240000 $TIME bigloo -heapsize 10
 }
 
 # -----------------------------------------------------------------------------
@@ -317,7 +334,7 @@ chicken_comp ()
 {
   {
     echo csc $COMPOPTS $1.scm
-  } | /usr/bin/time sh
+  } | $TIME sh
 }
 
 chicken_exec ()
@@ -334,7 +351,7 @@ chicken_int_comp ()
 
 chicken_int_exec ()
 {
-  printf "$REPLCOMMANDS" "$1" | /usr/bin/time csi -:hi10M -:hs0
+  printf "$REPLCOMMANDS" "$1" | $TIME csi -:hi10M -:hs0
 }
 
 # -----------------------------------------------------------------------------
@@ -399,7 +416,7 @@ petite_chez_comp ()
 
 petite_chez_exec ()
 {
-  printf "$REPLCOMMANDS" "$1" | /usr/bin/time petite
+  printf "$REPLCOMMANDS" "$1" | $TIME petite
 }
 
 # -----------------------------------------------------------------------------
@@ -408,13 +425,13 @@ petite_chez_exec ()
 stalin_comp ()
 {
   mv $1.scm $1.sc
-  /usr/bin/time stalin -copt -O2 -Ob -Om -On -Or -Ot -s $1
+  $TIME stalin -copt -O2 -Ob -Om -On -Or -Ot -s $1
 }
 
 stalin_exec ()
 {
   if test -f ./$1
-  then /usr/bin/time ./$1
+  then $TIME ./$1
   fi
 }
 
@@ -428,7 +445,7 @@ scm_comp ()
 
 scm_exec ()
 {
-  printf "$REPLCOMMANDS" "$1" | /usr/bin/time scm -f
+  printf "$REPLCOMMANDS" "$1" | $TIME scm -f
 }
 
 # -----------------------------------------------------------------------------
@@ -443,7 +460,7 @@ stk_exec ()
 {
   ### Need to send output to /dev/null so that it doesn't hang when there's
   ### an error...
-  printf "$REPLCOMMANDS" "$1" | /usr/bin/time snow -f < /dev/null
+  printf "$REPLCOMMANDS" "$1" | $TIME snow -f < /dev/null
 }
 
 # -----------------------------------------------------------------------------
@@ -456,7 +473,7 @@ awk_comp ()
 
 awk_exec ()
 {
-  /usr/bin/time ./$1.awk
+  $TIME ./$1.awk
 }
 
 # -----------------------------------------------------------------------------
@@ -466,14 +483,14 @@ cc_comp ()
 {
   {
      echo cc -O -o $1 $1.c -lm -lpthread
-  } | /usr/bin/time sh
+  } | $TIME sh
   ls -l $1
 }
 
 cc_exec ()
 {
   if test -f ./$1
-  then /usr/bin/time ./$1
+  then $TIME ./$1
   fi
 }
 
@@ -484,14 +501,14 @@ gcc_comp ()
 {
   {
      echo gcc -O3 -o $1 $1.c -lm -lpthread
-  } | /usr/bin/time sh
+  } | $TIME sh
   ls -l $1
 }
 
 gcc_exec ()
 {
   if test -f ./$1
-  then /usr/bin/time ./$1
+  then $TIME ./$1
   fi
 }
 
@@ -502,13 +519,13 @@ java_comp ()
 {
   {
      echo javac $1.java
-  } | /usr/bin/time sh
+  } | $TIME sh
   ls -l $1.class
 }
 
 java_exec ()
 {
-  /usr/bin/time java $1
+  $TIME java $1
 }
 
 # -----------------------------------------------------------------------------
@@ -546,7 +563,8 @@ NB_RUNS=1
 clean=false
 setting=r5rs
 options=""
-format=human
+format="human"
+time=$TIME 
 
 while [ $# -gt 2 ] ; do
    arg="$1"
@@ -558,9 +576,20 @@ while [ $# -gt 2 ] ; do
       -s) setting=$1    ; shift ;;
       -o) options=$1    ; shift ;;
       -f) format=$1     ; shift ;;
+      -t) time=$1       ; shift ;;
        *) error ">>> Unknown argument of $arg given." ;;
    esac
 done
+
+if [ "$format" == "sexp" ]; then
+  TIME=time_sexp
+else
+  TIME=$time
+fi
+
+if [ "$time" == "false" ]; then
+  MUST_TIME_IN_CODE="yes"
+fi
 
 if [ "$#" -ne 2 ]; then
   error '>>> Last two arguments must be <systems> and <benchmarks>'
@@ -593,110 +622,111 @@ for system in $systems ; do
     gambit) NAME='Gambit-C'
             COMP=gambit_comp
             EXEC=gambit_exec
+            INSERTCODE="(define-macro (if-must-time-in-code yes no) $MUST_TIME_IN_CODE)"
             iterfile=num-iters.scm
             extension=".scm"
             case "$setting" in
               mostly-fixflo)
                 COMPOPTS="-cc-options '$options'"
-                INSERTCODE="(declare (mostly-fixnum-flonum))(define-macro (if-fixflo yes no) no)"
+                INSERTCODE="(declare (mostly-fixnum-flonum))(define-macro (if-fixflo yes no) no)"$INSERTCODE
                 PREFIXCODE="; %s %s"
                 SUFFIXCODE="; %s %s"
                 REPLCOMMANDS=""
                 ;;
               mostly-flofix)
                 COMPOPTS="-cc-options '$options'"
-                INSERTCODE="(declare (mostly-flonum-fixnum))(define-macro (if-fixflo yes no) no)"
+                INSERTCODE="(declare (mostly-flonum-fixnum))(define-macro (if-fixflo yes no) no)"$INSERTCODE
                 PREFIXCODE="; %s %s"
                 SUFFIXCODE="; %s %s"
                 REPLCOMMANDS=""
                 ;;
               mostly-fix)
                 COMPOPTS="-cc-options '$options'"
-                INSERTCODE="(declare (mostly-fixnum))(define-macro (if-fixflo yes no) no)"
+                INSERTCODE="(declare (mostly-fixnum))(define-macro (if-fixflo yes no) no)"$INSERTCODE
                 PREFIXCODE="; %s %s"
                 SUFFIXCODE="; %s %s"
                 REPLCOMMANDS=""
                 ;;
               mostly-flo)
                 COMPOPTS="-cc-options '$options'"
-                INSERTCODE="(declare (mostly-flonum))(define-macro (if-fixflo yes no) no)"
+                INSERTCODE="(declare (mostly-flonum))(define-macro (if-fixflo yes no) no)"$INSERTCODE
                 PREFIXCODE="; %s %s"
                 SUFFIXCODE="; %s %s"
                 REPLCOMMANDS=""
                 ;;
               mostly-generic)
                 COMPOPTS="-cc-options '$options'"
-                INSERTCODE="(declare (mostly-generic))(define-macro (if-fixflo yes no) no)"
+                INSERTCODE="(declare (mostly-generic))(define-macro (if-fixflo yes no) no)"$INSERTCODE
                 PREFIXCODE="; %s %s"
                 SUFFIXCODE="; %s %s"
                 REPLCOMMANDS=""
                 ;;
               sb-mostly-fixflo)
                 COMPOPTS="-cc-options '$options'"
-                INSERTCODE="(declare (standard-bindings) (mostly-fixnum-flonum))(define-macro (if-fixflo yes no) no)"
+                INSERTCODE="(declare (standard-bindings) (mostly-fixnum-flonum))(define-macro (if-fixflo yes no) no)"$INSERTCODE
                 PREFIXCODE="; %s %s"
                 SUFFIXCODE="; %s %s"
                 REPLCOMMANDS=""
                 ;;
               sb-mostly-flofix)
                 COMPOPTS="-cc-options '$options'"
-                INSERTCODE="(declare (standard-bindings) (mostly-flonum-fixnum))(define-macro (if-fixflo yes no) no)"
+                INSERTCODE="(declare (standard-bindings) (mostly-flonum-fixnum))(define-macro (if-fixflo yes no) no)"$INSERTCODE
                 PREFIXCODE="; %s %s"
                 SUFFIXCODE="; %s %s"
                 REPLCOMMANDS=""
                 ;;
               sb-mostly-fix)
                 COMPOPTS="-cc-options '$options'"
-                INSERTCODE="(declare (standard-bindings) (mostly-fixnum))(define-macro (if-fixflo yes no) no)"
+                INSERTCODE="(declare (standard-bindings) (mostly-fixnum))(define-macro (if-fixflo yes no) no)"$INSERTCODE
                 PREFIXCODE="; %s %s"
                 SUFFIXCODE="; %s %s"
                 REPLCOMMANDS=""
                 ;;
               sb-mostly-flo)
                 COMPOPTS="-cc-options '$options'"
-                INSERTCODE="(declare (standard-bindings) (mostly-flonum))(define-macro (if-fixflo yes no) no)"
+                INSERTCODE="(declare (standard-bindings) (mostly-flonum))(define-macro (if-fixflo yes no) no)"$INSERTCODE
                 PREFIXCODE="; %s %s"
                 SUFFIXCODE="; %s %s"
                 REPLCOMMANDS=""
                 ;;
               sb-mostly-generic)
                 COMPOPTS="-cc-options '$options'"
-                INSERTCODE="(declare (standard-bindings) (mostly-generic))(define-macro (if-fixflo yes no) no)"
+                INSERTCODE="(declare (standard-bindings) (mostly-generic))(define-macro (if-fixflo yes no) no)"$INSERTCODE
                 PREFIXCODE="; %s %s"
                 SUFFIXCODE="; %s %s"
                 REPLCOMMANDS=""
                 ;;
               r5rs)
                 COMPOPTS="-cc-options '$options'"
-                INSERTCODE="(define-macro (if-fixflo yes no) no)"
+                INSERTCODE="(define-macro (if-fixflo yes no) no)"$INSERTCODE
                 PREFIXCODE="; %s %s"
                 SUFFIXCODE="; %s %s"
                 REPLCOMMANDS=""
                 ;;
               r6rs)
                 COMPOPTS="-cc-options '$options'"
-                INSERTCODE="(declare (standard-bindings) (extended-bindings) (block))(define-macro (if-fixflo yes no) no)"
+                INSERTCODE="(declare (standard-bindings) (extended-bindings) (block))(define-macro (if-fixflo yes no) no)"$INSERTCODE
                 PREFIXCODE="; %s %s"
                 SUFFIXCODE="; %s %s"
                 REPLCOMMANDS=""
                 ;;
               r6rs-unsafe)
                 COMPOPTS="-cc-options '$options'"
-                INSERTCODE="(declare (standard-bindings) (extended-bindings) (block) (not safe))(define-macro (if-fixflo yes no) no)"
+                INSERTCODE="(declare (standard-bindings) (extended-bindings) (block) (not safe))(define-macro (if-fixflo yes no) no)"$INSERTCODE
                 PREFIXCODE="; %s %s"
                 SUFFIXCODE="; %s %s"
                 REPLCOMMANDS=""
                 ;;
               r6rs-fixflo)
                 COMPOPTS="-cc-options '$options'"
-                INSERTCODE="(declare (standard-bindings) (extended-bindings) (block))(define-macro (if-fixflo yes no) yes)"
+                INSERTCODE="(declare (standard-bindings) (extended-bindings) (block))(define-macro (if-fixflo yes no) yes)"$INSERTCODE
                 PREFIXCODE="; %s %s"
                 SUFFIXCODE="; %s %s"
                 REPLCOMMANDS=""
                 ;;
               r6rs-fixflo-unsafe)
                 COMPOPTS="-cc-options '$options'"
-                INSERTCODE="(declare (standard-bindings) (extended-bindings) (block) (not safe))(define-macro (if-fixflo yes no) yes)"
+                INSERTCODE="(declare (standard-bindings) (extended-bindings) (block) (not safe))(define-macro (if-fixflo yes no) yes)"$INSERTCODE
                 PREFIXCODE="; %s %s"
                 SUFFIXCODE="; %s %s"
                 REPLCOMMANDS=""
@@ -707,36 +737,37 @@ for system in $systems ; do
 gambit-int) NAME='Gambit-C-int'
             COMP=gambit_int_comp
             COMPOPTS=""
+            INSERTCODE="(define-macro (if-must-time-in-code yes no) $MUST_TIME_IN_CODE)"
             EXEC=gambit_int_exec
             iterfile=num-iters-int.scm
             extension=".scm"
             case "$setting" in
               r5rs)
-                INSERTCODE="(define-macro (if-fixflo yes no) no)"
+                INSERTCODE="(define-macro (if-fixflo yes no) no)"$INSERTCODE
                 PREFIXCODE="; %s %s"
                 SUFFIXCODE="; %s %s"
                 REPLCOMMANDS="(load \"%s.scm\")"
                 ;;
               r6rs)
-                INSERTCODE="(define-macro (if-fixflo yes no) no)"
+                INSERTCODE="(define-macro (if-fixflo yes no) no)"$INSERTCODE
                 PREFIXCODE="; %s %s"
                 SUFFIXCODE="; %s %s"
                 REPLCOMMANDS="(load \"%s.scm\")"
                 ;;
               r6rs-unsafe)
-                INSERTCODE="(define-macro (if-fixflo yes no) no)"
+                INSERTCODE="(define-macro (if-fixflo yes no) no)"$INSERTCODE
                 PREFIXCODE="; %s %s"
                 SUFFIXCODE="; %s %s"
                 REPLCOMMANDS="(load \"%s.scm\")"
                 ;;
               r6rs-fixflo)
-                INSERTCODE="(define-macro (if-fixflo yes no) yes)"
+                INSERTCODE="(define-macro (if-fixflo yes no) yes)"$INSERTCODE
                 PREFIXCODE="; %s %s"
                 SUFFIXCODE="; %s %s"
                 REPLCOMMANDS="(load \"%s.scm\")"
                 ;;
               r6rs-fixflo-unsafe)
-                INSERTCODE="(define-macro (if-fixflo yes no) yes)"
+                INSERTCODE="(define-macro (if-fixflo yes no) yes)"$INSERTCODE
                 PREFIXCODE="; %s %s"
                 SUFFIXCODE="; %s %s"
                 REPLCOMMANDS="(load \"%s.scm\")"
@@ -746,11 +777,11 @@ gambit-int) NAME='Gambit-C-int'
 
     ribbit) NAME='Ribbit'
             COMP=ribbit_comp
-            COMPOPTS="$options -l r4rs"
+            COMPOPTS="$options"
             EXEC=ribbit_exec
             iterfile=num-iters.scm
             extension=".scm"
-            INSERTCODE="(define-macro (if-fixflo yes no) no)"
+            INSERTCODE="(define-macro (if-fixflo yes no) no) (define-macro (if-must-time-in-code yes no) $MUST_TIME_IN_CODE)"
             PREFIXCODE="; %s %s"
             SUFFIXCODE="; %s %s"
             REPLCOMMANDS=""
@@ -762,7 +793,7 @@ ribbit-int) NAME='Ribbit-int'
             EXEC=ribbit_int_exec
             iterfile=num-iters-int.scm
             extension=".scm"
-            INSERTCODE=""
+            INSERTCODE="(define must-time-in-code '$MUST_TIME_IN_CODE)"
             PREFIXCODE="; %s %s"
             SUFFIXCODE="; %s %s"
             REPLCOMMANDS="(load \"%s.scm\")"
@@ -1153,11 +1184,11 @@ petite-chez) NAME='Petite-Chez-Scheme'
 
    {
       if [ $format == "human" ] ; then
-      echo
-      echo '****************************'
-      echo Benchmarking ${NAME}-${setting} on `date` under `uname -a`
+        echo
+        echo '****************************'
+        echo Benchmarking ${NAME}-${setting} on `date` under `uname -a`
       else
-      echo "(((name $NAME) (setting $setting) (date $(date)) (system $(uname -a))"
+        echo "(((name $NAME) (setting $setting) (date \"$(date -Iseconds)\") (system $(uname))"
       fi
    } 2>&1 | tee -a ../../results.${NAME}-${setting}
 

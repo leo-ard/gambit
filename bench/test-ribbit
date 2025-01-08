@@ -15,10 +15,10 @@
 # asm-repl-pna 
 # asm-repl-tc: FAIL (takes too long)
 
-BENCH_OPT="-i num-iters-int.scm"
+BENCH_OPT="-i num-iters-int.scm -f sexp"
 
-ASM_OPT="-t asm -e optimal -f+ compression/lzss/2b"
-JS_OPT="-t js -m -e optimal -f+ compression/lzss/tag"
+ASM_OPT="-t asm -e optimal -f+ compression/lzss/2b -l r4rs"
+JS_OPT="-t js -e optimal -f+ compression/lzss/tag -l r4rs"
 
 PNA_OPT="-f+ prim-no-arity"
 TC_OPT="-l r4rs/optimize-tc -l r4rs/tc"
@@ -27,16 +27,16 @@ O_OPT="-l r4rs/optimize"
 RSC_TESTS="ctak fib ack mazefun tak takl primes deriv nqueens sum"
 RSI_TESTS="ctak fib ack mazefun tak takl primes deriv"
 
-export RIBBIT_COMP="/home/laromat/ribbit/src/rsc"
-export RIBBIT_INT="/home/laromat/ribbit/src/rsi"
+export RIBBIT_COMP="/Users/leonard/udem-dlteam/ribbit/src/rsc"
+export RIBBIT_INT="/Users/leonard/udem-dlteam/ribbit/src/rsi"
 
 echo $RIBBIT_COMP
 
 run_bench() {
    local filename=$1
    shift
-   echo "Command :" "$@" > $filename
-   echo running "$@"
+   #echo "Command :" "$@" > $filename
+   #echo running "$@"
    "$@" | tee -a $filename
 }
 
@@ -48,7 +48,7 @@ run_bench() {
 #run_bench "results/size-asm-pna-tc.log" ./bench $BENCH_OPT -o "$ASM_OPT $TC_OPT $PNA_OPT" ribbit "$RSC_TESTS"
 
 # For variation js:
-#run_bench "results/size-js.log" ./bench $BENCH_OPT -o "$JS_OPT $O_OPT" ribbit "$RSC_TESTS"
+run_bench "results/size-js.log" ./bench $BENCH_OPT -o "$JS_OPT $O_OPT" ribbit "$RSC_TESTS"
 #run_bench "results/size-js-pna.log" ./bench $BENCH_OPT -o "$JS_OPT $O_OPT $PNA_OPT" ribbit "$RSC_TESTS"
 #run_bench "results/size-js-tc.log" ./bench $BENCH_OPT -o "$JS_OPT $TC_OPT" ribbit "$RSC_TESTS"
 #run_bench "results/size-js-pna-tc.log" ./bench $BENCH_OPT -o "$JS_OPT $TC_OPT $PNA_OPT" ribbit "$RSC_TESTS"
